@@ -8,10 +8,13 @@ import (
 	"log"
 	"net/http"
 	"rhydb/passtel/schema"
+	"strconv"
 
 	"github.com/go-playground/validator"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
+	"github.com/lib/pq"
 	_ "github.com/lib/pq"
 )
 
@@ -49,15 +52,6 @@ func errorJson(c echo.Context, err error) error {
 	return c.JSON(http.StatusBadRequest, echo.Map{"message": err.Error()})
 }
 
-func generateToken(userId int64) (uuid.UUID, error) {
-	token, err := queries.GenToken(ctx, userId)
-	if err != nil {
-		return uuid.UUID{}, err
-	}
-
-	return token, nil
-}
-
 type AuthData struct {
 	Token string `json:"token"`
 }
@@ -71,31 +65,24 @@ func main() {
 		log.Fatal(err)
 	}
 
-	authMiddleware := func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) (err error) {
-			data := new(AuthData)
-			if err = c.Bind(data); err != nil {
-				log.Println("failed to bind auth data", err)
-				return c.JSON(http.StatusBadRequest, echo.Map{"message": err.Error()})
-			}
-			if data.Token == "" {
-				return c.JSON(http.StatusBadRequest, echo.Map{"message": "missing token"})
-			}
-
-			token, err := uuid.Parse(data.Token)
-			if err != nil {
-				return echo.ErrBadRequest
-			}
-
-			user, err := queries.CheckToken(ctx, token)
-			if err != nil {
-				return echo.ErrUnauthorized
-			}
-
-			c.Set("user", user)
-			return next(c)
+	authMiddleware := middleware.KeyAuth(func(key string, c echo.Context) (bool, error) {
+		token, err := uuid.Parse(key)
+		if err != nil {
+			return false, err
 		}
-	}
+
+		row, err := queries.CheckToken(ctx, token)
+		if err != nil {
+			return false, err
+		}
+
+		c.Set("user", schema.User{
+			UserID:   row.UserID,
+			Username: row.Username,
+			Password: row.Password,
+		})
+		return true, nil
+	})
 
 	queries = schema.New(db)
 
@@ -151,7 +138,7 @@ func main() {
 			return echo.ErrUnauthorized
 		}
 
-		token, err := generateToken(user.ID)
+		token, err := queries.GenToken(ctx, user.UserID)
 		if err != nil {
 			log.Println("failed to generate token:", err)
 			return echo.ErrInternalServerError
@@ -175,6 +162,53 @@ func main() {
 			return echo.ErrBadRequest
 		}
 		return c.JSON(http.StatusOK, users)
+	})
+
+	vault := e.Group("/vault", authMiddleware)
+	vault.GET("/:id", func(c echo.Context) error {
+		idStr := c.Param("id")
+		if idStr == "" {
+			return echo.ErrBadRequest
+		}
+
+		id, err := strconv.ParseInt(idStr, 10, 64)
+		if err != nil {
+			return echo.ErrBadRequest
+		}
+
+		vault, err := queries.GetVault(ctx, id)
+		if err != nil {
+			return echo.ErrBadRequest
+		}
+
+		return c.JSON(http.StatusOK, vault)
+	})
+
+	// create a new vault
+	vault.POST("/:name", func(c echo.Context) error {
+		name := c.Param("name")
+		if name == "" {
+			return echo.ErrBadRequest
+		}
+
+		user := c.Get("user").(schema.User)
+
+		vault, err := queries.CreateVault(ctx, schema.CreateVaultParams{
+			Name:   name,
+			UserID: user.UserID,
+		})
+		if err != nil {
+			pqError, isPQError := err.(*pq.Error)
+			if !isPQError || pqError.Constraint == "" {
+				return echo.ErrInternalServerError
+			}
+
+			return echo.NewHTTPError(http.StatusBadRequest, "Vault already exists")
+		}
+
+		return c.JSON(http.StatusOK, echo.Map{
+			"id": vault.VaultID,
+		})
 	})
 
 	e.Logger.Fatal(e.Start(":1234"))

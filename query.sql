@@ -1,6 +1,6 @@
 -- name: GetUser :one
 SELECT * FROM users
-WHERE id = $1 LIMIT 1;
+WHERE user_id = $1 LIMIT 1;
 
 -- name: CheckCreds :one
 SELECT * FROM users
@@ -21,7 +21,7 @@ ORDER BY username;
 
 -- name: DeletUser :exec
 DELETE FROM users
-WHERE id = $1;
+WHERE user_id = $1;
 
 
 -- name: GenToken :one
@@ -33,6 +33,23 @@ INSERT INTO tokens (
 RETURNING plaintext;
 
 -- name: CheckToken :one
-SELECT users.*
-FROM tokens JOIN users ON tokens.user_id = users.id
-WHERE tokens.plaintext = $1 LIMIT 1;
+UPDATE tokens AS t
+SET last_used = NOW()
+FROM users AS u
+WHERE t.user_id = u.user_id
+AND t.plaintext = $1
+AND (t.expires_at IS NULL OR t.expires_at > NOW())
+RETURNING u.*, t.expires_at;
+
+-- name: UseToken :exec
+UPDATE tokens SET last_used = NOW() WHERE token_id = $1;
+
+-- name: GetVault :one
+SELECT * FROM vaults
+WHERE vault_id = $1 LIMIT 1;
+
+-- name: CreateVault :one
+INSERT INTO vaults (
+       name, user_id
+) VALUES ($1, $2)
+RETURNING *;
