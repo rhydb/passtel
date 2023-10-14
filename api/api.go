@@ -7,7 +7,7 @@ import (
 	"encoding/hex"
 	"log"
 	"net/http"
-	"rhydb/passtel/schema"
+	"rhydb/passtel/api/schema"
 	"strconv"
 
 	"github.com/go-playground/validator"
