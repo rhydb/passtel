@@ -58,37 +58,41 @@ func generateToken(userId int64) (uuid.UUID, error) {
 	return token, nil
 }
 
+type AuthData struct {
+	Token string `json:"token"`
+}
+
 func main() {
 	e := echo.New()
 	e.Validator = &CustomValidator{validator: validator.New()}
 
-	db, err := sql.Open("postgres", "user=rb dbname=schema sslmode=disable")
+	db, err := sql.Open("postgres", "user=rb dbname=passtel sslmode=disable")
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	authMiddleware := func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
-			data := new(struct {
-				Token string `json:"token"`
-			})
+		return func(c echo.Context) (err error) {
+			data := new(AuthData)
 			if err = c.Bind(data); err != nil {
-				//c.JSON(http.StatusBadRequest, echo.Map{"message": "improper token"})
+				log.Println("failed to bind auth data", err)
+				return c.JSON(http.StatusBadRequest, echo.Map{"message": err.Error()})
+			}
+			if data.Token == "" {
+				return c.JSON(http.StatusBadRequest, echo.Map{"message": "missing token"})
 			}
 
-			//token, err := uuid.Parse(data.Token)
-			//if err != nil {
-			//	log.Println(err.Error())
-			//	return c.JSON(http.StatusBadRequest, echo.Map{"message": "improper token"})
-			//}
+			token, err := uuid.Parse(data.Token)
+			if err != nil {
+				return echo.ErrBadRequest
+			}
 
-			//user, err := queries.CheckToken(ctx, token)
-			//if err != nil {
-			//	log.Println(err.Error())
-			//	return c.JSON(http.StatusUnauthorized, echo.Map{"message": "invalid token"})
-			//}
+			user, err := queries.CheckToken(ctx, token)
+			if err != nil {
+				return echo.ErrUnauthorized
+			}
 
-			//c.Set("user", user)
+			c.Set("user", user)
 			return next(c)
 		}
 	}
@@ -98,16 +102,17 @@ func main() {
 	e.POST("/register", func(c echo.Context) (err error) {
 		data := new(User)
 		if err = c.Bind(data); err != nil {
-			return errorJson(c, err)
+			return echo.ErrBadRequest
 		}
 
 		if err = c.Validate(data); err != nil {
-			return err
+			return echo.ErrBadRequest
 		}
 
 		data.Password, err = hash(data.Password)
 		if err != nil {
-			return errorJson(c, err)
+			log.Println("failed to hash password:", err.Error())
+			return echo.ErrInternalServerError
 		}
 
 		response, err := queries.CreateUser(ctx, schema.CreateUserParams{
@@ -115,7 +120,8 @@ func main() {
 			Password: data.Password,
 		})
 		if err != nil {
-			return errorJson(c, err)
+			log.Println("failed to create new user:", err)
+			return echo.ErrInternalServerError
 		}
 
 		return c.JSON(http.StatusOK, response)
@@ -124,16 +130,17 @@ func main() {
 	e.POST("/login", func(c echo.Context) error {
 		data := new(User)
 		if err = c.Bind(data); err != nil {
-			return errorJson(c, err)
+			return echo.ErrBadRequest
 		}
 
 		if err = c.Validate(data); err != nil {
-			return err
+			return echo.ErrBadRequest
 		}
 
 		data.Password, err = hash(data.Password)
 		if err != nil {
-			return errorJson(c, err)
+			log.Println("failed to hash password:", err.Error())
+			return echo.ErrInternalServerError
 		}
 
 		user, err := queries.CheckCreds(ctx, schema.CheckCredsParams{
@@ -141,33 +148,23 @@ func main() {
 			Password: data.Password,
 		})
 		if err != nil {
-			return errorJson(c, err)
+			return echo.ErrUnauthorized
 		}
 
 		token, err := generateToken(user.ID)
 		if err != nil {
-			return errorJson(c, err)
+			log.Println("failed to generate token:", err)
+			return echo.ErrInternalServerError
 		}
 		return c.JSON(http.StatusOK, echo.Map{
 			"token": token,
 		})
 	})
 
-	e.GET("/user/:id", func(c echo.Context) (err error) {
-		params := struct {
-			Id int64 `json:"id" param:"id"`
-		}{}
-
-		if err = c.Bind(&params); err != nil {
-			return c.JSON(http.StatusInternalServerError, echo.Map{"message": err.Error()})
-		}
-
-		user, err := queries.GetUser(ctx, params.Id)
-		if err != nil {
-			return c.JSON(http.StatusInternalServerError, echo.Map{"message": err.Error()})
-		}
+	e.GET("/user", func(c echo.Context) (err error) {
+		user := c.Get("user").(schema.User)
+		log.Println("user=", user)
 		return c.JSON(http.StatusOK, user)
-
 	}, authMiddleware)
 
 	e.GET("/users", func(c echo.Context) error {
@@ -175,7 +172,7 @@ func main() {
 		users, err := queries.ListUsers(ctx)
 		if err != nil {
 			log.Println(err)
-			return err
+			return echo.ErrBadRequest
 		}
 		return c.JSON(http.StatusOK, users)
 	})
