@@ -55,9 +55,15 @@ func main() {
 	e.GET("/user", routes.GetAuthedUser, auth.TokenAuth(ctx, queries))
 
 	// all vault routes require authentication
+	e.GET("/vaults", routes.ListVaults(ctx, queries), auth.TokenAuth(ctx, queries))
+
 	vault := e.Group("/vault", auth.TokenAuth(ctx, queries))
-	vault.GET("/:id", routes.GetVault(ctx, queries))
 	vault.POST("/:name", routes.CreateVault(ctx, queries))
+	vault.GET("/:id", routes.GetVault(ctx, queries))
+	vault.PUT("/:id", routes.UpdateVault(ctx, queries))
+	vault.DELETE("/:id", routes.DeleteVault(ctx, queries))
+	// vault items
+	vault.POST("/:id", routes.AddVaultItem(ctx, queries))
 
 	e.Logger.Fatal(e.Start(":1234"))
 }

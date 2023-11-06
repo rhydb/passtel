@@ -27,3 +27,16 @@ CREATE TABLE IF NOT EXISTS vaults
         DEFERRABLE
         NOT VALID
 );
+
+CREATE TABLE IF NOT EXISTS vault_items
+(
+    item_id bigint NOT NULL DEFAULT nextval('vault_items_item_id_seq'::regclass),
+    vault_id bigint NOT NULL DEFAULT nextval('vault_items_vault_id_seq'::regclass),
+    name character varying(20) COLLATE pg_catalog."default" NOT NULL,
+    icon text COLLATE pg_catalog."default",
+    CONSTRAINT vault_items_pkey PRIMARY KEY (item_id),
+    CONSTRAINT vault_items_vault_id_fkey FOREIGN KEY (vault_id)
+        REFERENCES public.vaults (vault_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
+        ON DELETE NO ACTION
+)

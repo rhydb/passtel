@@ -71,7 +71,7 @@ func CreateUser(ctx context.Context, queries *schema.Queries) echo.HandlerFunc {
 
 		creds.Password, err = hash(creds.Password)
 		if err != nil {
-			log.Println("failed to hash password:", err.Error())
+
 			return echo.ErrInternalServerError
 		}
 

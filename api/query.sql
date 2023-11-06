@@ -53,3 +53,29 @@ INSERT INTO vaults (
        name, user_id
 ) VALUES ($1, $2)
 RETURNING *;
+
+
+-- name: ListVaults :many
+SELECT * from vaults
+WHERE user_id = $1;
+
+
+-- name: SetVaultName :one
+UPDATE vaults
+SET name = $2
+WHERE vault_id = $1
+RETURNING *;
+
+-- name: DeleteVault :one
+DELETE from vaults
+WHERE vault_id = $1
+RETURNING vault_id;
+
+-- name: GetVaultItems :many
+SELECT * FROM vault_items
+WHERE vault_id = $1;
+
+-- name: AddVaultItem :exec
+INSERT INTO vault_items (
+       vault_id, name, icon)
+VALUES ($1, $2, $3);
