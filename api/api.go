@@ -62,8 +62,11 @@ func main() {
 	vault.GET("/:id", routes.GetVault(ctx, queries))
 	vault.PUT("/:id", routes.UpdateVault(ctx, queries))
 	vault.DELETE("/:id", routes.DeleteVault(ctx, queries))
+
 	// vault items
 	vault.POST("/:id", routes.AddVaultItem(ctx, queries))
+        vault.PUT(":/id", routes.UpdateVaultItem(ctx, queries))
+        vault.DELETE("/:id")
 
 	e.Logger.Fatal(e.Start(":1234"))
 }

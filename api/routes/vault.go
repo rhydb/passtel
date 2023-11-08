@@ -3,6 +3,7 @@ package routes
 import (
 	"context"
 	"database/sql"
+	"log"
 	"net/http"
 	auth "rhydb/passtel/api/handlers"
 	"rhydb/passtel/api/schema"
@@ -81,19 +82,16 @@ type VaultUpdate struct {
 
 func UpdateVault(ctx context.Context, queries *schema.Queries) echo.HandlerFunc {
 	return func(c echo.Context) error {
-		idStr := c.Param("id")
-		if idStr == "" {
-			return echo.ErrBadRequest
+		vaultId, err := getVaultIdParam(c.Param("id"))
+		if err != nil {
+			return err
 		}
 
-		id, err := strconv.ParseInt(idStr, 10, 64)
-		if err != nil {
-			return echo.ErrBadRequest
-		}
+		user := c.Get("user").(schema.User)
 
-		vault, err := queries.GetVault(ctx, id)
+		vault, err := getUserVault(ctx, queries, vaultId, user.UserID)
 		if err != nil {
-			return echo.ErrBadRequest
+			return err
 		}
 
 		vaultUpdate := new(VaultUpdate)
@@ -126,6 +124,7 @@ func DeleteVault(ctx context.Context, queries *schema.Queries) echo.HandlerFunc 
 
 		deletedId, err := queries.DeleteVault(ctx, vaultId)
 		if err != nil || deletedId != vaultId {
+                        log.Println("failed to delete vault:", err)
 			return echo.ErrBadRequest
 		}
 
@@ -158,7 +157,7 @@ func GetVault(ctx context.Context, queries *schema.Queries) echo.HandlerFunc {
 	}
 }
 
-type NewVaultItem struct {
+type VaultItemParams struct {
 	Name string `json:"name" validate:"required,max=20"`
 	Icon string `json:"icon"`
 }
@@ -177,23 +176,86 @@ func AddVaultItem(ctx context.Context, queries *schema.Queries) echo.HandlerFunc
 			return err
 		}
 
-		vaultItem := new(NewVaultItem)
-		if err = c.Bind(vaultItem); err != nil {
+		params := new(VaultItemParams)
+		if err = c.Bind(params); err != nil {
 			return echo.ErrBadRequest
 		}
 
-		if err = c.Validate(vaultItem); err != nil {
+		if err = c.Validate(params); err != nil {
 			return echo.ErrBadRequest
 		}
 
 		if err = queries.AddVaultItem(ctx, schema.AddVaultItemParams{
 			VaultID: vault.VaultID,
-			Name:    vaultItem.Name,
-			Icon:    sql.NullString{String: vaultItem.Icon, Valid: true},
+			Name:    params.Name,
+			Icon:    sql.NullString{String: params.Icon, Valid: true},
 		}); err != nil {
 			return echo.ErrInternalServerError
 		}
 
 		return c.NoContent(http.StatusOK)
+	}
+}
+
+func UpdateVaultItem(ctx context.Context, queries *schema.Queries) echo.HandlerFunc {
+	return func(c echo.Context) error {
+                vaultId, err := getVaultIdParam(c.Param("id")) 
+                if err != nil {
+                    return err
+                }
+
+                user := c.Get("user").(schema.User)
+                vault, err := getUserVault(ctx, queries, vaultId, user.UserID)
+
+		params := new(VaultItemParams)
+		if err = c.Bind(params); err != nil {
+			return echo.ErrBadRequest
+		}
+
+		if err = c.Validate(params); err != nil {
+			return echo.ErrBadRequest
+		}
+
+		err = queries.UpdateVaultItem(ctx, schema.UpdateVaultItemParams{
+			VaultID: vault.VaultID,
+			Name:    params.Name,
+			Icon:    sql.NullString{String: params.Icon, Valid: true},
+		})
+		if err != nil {
+			return auth.HandleQueryError(err, "Vault item already exists")
+		}
+
+		return c.NoContent(http.StatusOK)
+	}
+}
+
+func DeleteVautlItem(ctx context.Context, queries *schema.Queries) echo.HandlerFunc {
+	return func(c echo.Context) error {
+                vaultItemId, err := getVaultIdParam(c.Param("id")) 
+                if err != nil {
+                    return err
+                }
+
+                user := c.Get("user").(schema.User)
+
+                // get the vault item and vault data
+                vaultItem, err := queries.GetVaultItem(vaultItemId)
+                if err != nil {
+                    return echo.ErrBadRequest
+                }
+
+                // the vault the item belongs to is not the user's
+                if vaultItem.UserID != user.UserID {
+                    return echo.ErrUnauthorized
+                }
+
+                err = queries.DeleteVaultItem(vaultItem.VaultID)
+                if err != nil {
+                    log.Println("Failed to delete vault item:", err)
+                    return echo.ErrInternalServerError
+                }
+
+                return c.JSON(http.StatusOK, vaultItem)
+		// return c.NoContent(http.StatusOK)
 	}
 }

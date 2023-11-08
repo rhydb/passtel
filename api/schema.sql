@@ -1,3 +1,6 @@
+CREATE TYPE fieldtype AS ENUM
+    ('username', 'url', 'email', 'password', 'otp');
+
 CREATE TABLE IF NOT EXISTS users (
        user_id BIGSERIAL PRIMARY KEY,
        username varchar(25) UNIQUE NOT NULL,
@@ -28,7 +31,7 @@ CREATE TABLE IF NOT EXISTS vaults
         NOT VALID
 );
 
-CREATE TABLE IF NOT EXISTS vault_items
+CREATE TABLE IF NOT EXISTS public.vault_items
 (
     item_id bigint NOT NULL DEFAULT nextval('vault_items_item_id_seq'::regclass),
     vault_id bigint NOT NULL DEFAULT nextval('vault_items_vault_id_seq'::regclass),
@@ -38,5 +41,21 @@ CREATE TABLE IF NOT EXISTS vault_items
     CONSTRAINT vault_items_vault_id_fkey FOREIGN KEY (vault_id)
         REFERENCES public.vaults (vault_id) MATCH SIMPLE
         ON UPDATE NO ACTION
+        ON DELETE CASCADE
+        NOT VALID
+);
+
+CREATE TABLE IF NOT EXISTS fields
+(
+    field_id bigint NOT NULL DEFAULT nextval('fields_field_url_seq'::regclass),
+    item_id bigint NOT NULL DEFAULT nextval('fields_item_id_seq'::regclass),
+    type fieldtype NOT NULL DEFAULT 'username'::fieldtype,
+    " value" character varying COLLATE pg_catalog."default",
+    CONSTRAINT fields_pkey PRIMARY KEY (field_id),
+    CONSTRAINT fields_item_id_fkey FOREIGN KEY (item_id)
+        REFERENCES public.vault_items (item_id) MATCH SIMPLE
+        ON UPDATE NO ACTION
         ON DELETE NO ACTION
-)
+        NOT VALID
+);
+

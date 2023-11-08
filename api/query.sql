@@ -67,7 +67,7 @@ WHERE vault_id = $1
 RETURNING *;
 
 -- name: DeleteVault :one
-DELETE from vaults
+DELETE FROM vaults
 WHERE vault_id = $1
 RETURNING vault_id;
 
@@ -75,7 +75,23 @@ RETURNING vault_id;
 SELECT * FROM vault_items
 WHERE vault_id = $1;
 
+-- name: GetVaultItem :one
+SELECT vault.vault_id, vault.user_id, item.item_id, item.name, item.icon
+FROM vault_items AS item
+JOIN vaults AS vault
+ON item.item_id = vault.vault_id
+WHERE item_id = $1;
+
 -- name: AddVaultItem :exec
 INSERT INTO vault_items (
        vault_id, name, icon)
 VALUES ($1, $2, $3);
+
+-- name: UpdateVaultItem :exec
+UPDATE vault_items
+SET name = $2, icon = $3
+WHERE vault_id = $1;
+
+-- name: DeleteVaultItem :exec
+DELETE FROM vault_items
+WHERE vault_id = $1;
