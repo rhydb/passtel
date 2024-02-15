@@ -79,19 +79,49 @@ WHERE vault_id = $1;
 SELECT vault.vault_id, vault.user_id, item.item_id, item.name, item.icon
 FROM vault_items AS item
 JOIN vaults AS vault
-ON item.item_id = vault.vault_id
-WHERE item_id = $1;
+ON item.vault_id = vault.vault_id
+WHERE item.item_id = $1;
 
--- name: AddVaultItem :exec
+-- name: AddVaultItem :one
 INSERT INTO vault_items (
        vault_id, name, icon)
-VALUES ($1, $2, $3);
+VALUES ($1, $2, $3)
+RETURNING *;
 
 -- name: UpdateVaultItem :exec
 UPDATE vault_items
-SET name = $2, icon = $3
-WHERE vault_id = $1;
+SET name = $3, icon = $4
+WHERE vault_id = $1 AND item_id = $2;
 
 -- name: DeleteVaultItem :exec
 DELETE FROM vault_items
-WHERE vault_id = $1;
+WHERE item_id = $1;
+
+-- name: AddField :one
+INSERT INTO fields (
+        item_id, type, value
+) VALUES ($1, $2, $3)
+RETURNING *;
+
+-- name: GetItemFields :many
+SELECT * FROM fields
+WHERE item_id = $1;
+
+-- name: GetFieldOwner :one
+SELECT v.user_id 
+FROM vaults as v
+JOIN vault_items as i
+ON v.vault_id = i.vault_id
+JOIN fields as f
+ON f.item_id = i.item_id
+AND f.field_id = $1
+LIMIT 1;
+
+-- name: UpdateField :exec
+UPDATE fields
+SET type = $2, value = $3
+WHERE field_id = $1;
+
+-- name: DeleteField :exec
+DELETE FROM fields
+WHERE field_id = $1;

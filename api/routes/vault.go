@@ -5,9 +5,8 @@ import (
 	"database/sql"
 	"log"
 	"net/http"
-	auth "rhydb/passtel/api/handlers"
 	"rhydb/passtel/api/schema"
-	"strconv"
+	"rhydb/passtel/api/utils"
 
 	"github.com/labstack/echo/v4"
 )
@@ -15,7 +14,12 @@ import (
 // get a vault if it belongs to user, or throw unauthorised
 func getUserVault(ctx context.Context, queries *schema.Queries, vaultId int64, userId int64) (schema.Vault, error) {
 	vault, err := queries.GetVault(ctx, vaultId)
+        if err == sql.ErrNoRows {
+            return schema.Vault{}, echo.NewHTTPError(http.StatusNotFound, "No vault with that ID")
+        }
+
 	if err != nil {
+                log.Println("Error finding vault:", err)
 		return schema.Vault{}, echo.ErrBadRequest
 	}
 
@@ -26,24 +30,47 @@ func getUserVault(ctx context.Context, queries *schema.Queries, vaultId int64, u
 	return vault, nil
 }
 
-// convert the vault ID to an int64 or throw a bad request
-func getVaultIdParam(param string) (int64, error) {
-	vaultIdStr := param
-	if vaultIdStr == "" {
-		return -1, echo.ErrBadRequest
-	}
 
-	id, err := strconv.ParseInt(vaultIdStr, 10, 64)
-	if err != nil {
-		return -1, echo.ErrBadRequest
-	}
+func getVaultItem(ctx context.Context, queries *schema.Queries, userId int64, itemIdParam string) (schema.VaultItem, error) {
 
-	return id, nil
+        // get the item ID from the route
+        itemId, err := utils.GetIDParam(itemIdParam) 
+        if err != nil {
+            return schema.VaultItem{}, err
+        }
+
+        // get the vault item
+        vaultItem, err := queries.GetVaultItem(ctx, itemId)
+        if err == sql.ErrNoRows {
+            return schema.VaultItem{}, echo.NewHTTPError(http.StatusNotFound, "No item with that ID")
+        }
+
+        // get the users vault using the item
+        vault, err := getUserVault(ctx, queries, vaultItem.VaultID, userId)
+        if err != nil {
+            return schema.VaultItem{}, err
+        }
+
+        if vault.UserID != userId {
+                return schema.VaultItem{}, echo.ErrUnauthorized
+        }
+
+        if err != nil || vaultItem.VaultID != vault.VaultID {
+            return schema.VaultItem{}, echo.ErrBadRequest
+        }
+
+        return schema.VaultItem{
+            ItemID: vaultItem.ItemID,
+            VaultID: vaultItem.VaultID,
+            Name: vaultItem.Name,
+            Icon: vaultItem.Icon,
+        }, nil
 }
 
+// create an empty vault with a name
 func CreateVault(ctx context.Context, queries *schema.Queries) echo.HandlerFunc {
 	return func(c echo.Context) error {
-		name := c.Param("name")
+		name := c.Param("vaultName")
 		if name == "" {
 			return echo.ErrBadRequest
 		}
@@ -55,34 +82,37 @@ func CreateVault(ctx context.Context, queries *schema.Queries) echo.HandlerFunc 
 			UserID: user.UserID,
 		})
 		if err != nil {
-			return auth.HandleQueryError(err, "Vault already exists")
+			return utils.HandleQueryError(err, "Vault already exists")
 		}
 
 		return c.JSON(http.StatusOK, echo.Map{
-			"id": vault.VaultID,
+			"vaultId": vault.VaultID,
 		})
 	}
 }
 
+// list a user's vaults
 func ListVaults(ctx context.Context, queries *schema.Queries) echo.HandlerFunc {
 	return func(c echo.Context) error {
 		user := c.Get("user").(schema.User)
 		vaults, err := queries.ListVaults(ctx, user.UserID)
 		if err != nil {
-			return auth.HandleQueryError(err, "No vaults found")
+			return utils.HandleQueryError(err, "No vaults found")
 		}
 
 		return c.JSON(http.StatusOK, vaults)
 	}
 }
 
-type VaultUpdate struct {
-	Name string `json:"name" validate:"required"`
-}
 
+// update a user's vault name
 func UpdateVault(ctx context.Context, queries *schema.Queries) echo.HandlerFunc {
+        type VaultUpdate struct {
+            Name string `json:"name" validate:"required"`
+        }
+
 	return func(c echo.Context) error {
-		vaultId, err := getVaultIdParam(c.Param("id"))
+		vaultId, err := utils.GetIDParam(c.Param("vaultId"))
 		if err != nil {
 			return err
 		}
@@ -95,37 +125,43 @@ func UpdateVault(ctx context.Context, queries *schema.Queries) echo.HandlerFunc 
 		}
 
 		vaultUpdate := new(VaultUpdate)
-		if err = c.Bind(vaultUpdate); err != nil {
-			return echo.ErrBadRequest
-		}
-
-		if err = c.Validate(vaultUpdate); err != nil {
-			return echo.ErrBadRequest
-		}
+                if err = utils.BindValidateParams(c, vaultUpdate); err != nil {
+                        return err;
+                }
 
 		vault, err = queries.SetVaultName(ctx, schema.SetVaultNameParams{
 			VaultID: vault.VaultID,
 			Name:    vaultUpdate.Name,
 		})
 		if err != nil {
-			return auth.HandleQueryError(err, "Vault already exists")
+			return utils.HandleQueryError(err, "Vault already exists")
 		}
 
 		return c.NoContent(http.StatusOK)
 	}
 }
 
+// delete a user's vault and everything in it
 func DeleteVault(ctx context.Context, queries *schema.Queries) echo.HandlerFunc {
 	return func(c echo.Context) error {
-		vaultId, err := getVaultIdParam(c.Param("id"))
+		vaultId, err := utils.GetIDParam(c.Param("vaultId"))
 		if err != nil {
 			return err
 		}
 
-		deletedId, err := queries.DeleteVault(ctx, vaultId)
+		user := c.Get("user").(schema.User)
+		vault, err := getUserVault(ctx, queries, vaultId, user.UserID)
+		if err != nil {
+			return err
+		}
+
+		deletedId, err := queries.DeleteVault(ctx, vault.VaultID)
+                if err == sql.ErrNoRows {
+                    return echo.NewHTTPError(http.StatusNotFound, "No vault with that ID")
+                }
+
 		if err != nil || deletedId != vaultId {
-                        log.Println("failed to delete vault:", err)
-			return echo.ErrBadRequest
+                        return utils.HandleQueryError(err, "ID mismatch")
 		}
 
 		return c.NoContent(http.StatusOK)
@@ -134,9 +170,10 @@ func DeleteVault(ctx context.Context, queries *schema.Queries) echo.HandlerFunc 
 
 // vault items
 
-func GetVault(ctx context.Context, queries *schema.Queries) echo.HandlerFunc {
+// list the items in one vault
+func ListVaultItems(ctx context.Context, queries *schema.Queries) echo.HandlerFunc {
 	return func(c echo.Context) error {
-		vaultId, err := getVaultIdParam(c.Param("id"))
+		vaultId, err := utils.GetIDParam(c.Param("vaultId"))
 		if err != nil {
 			return err
 		}
@@ -149,6 +186,9 @@ func GetVault(ctx context.Context, queries *schema.Queries) echo.HandlerFunc {
 		}
 
 		vaultItems, err := queries.GetVaultItems(ctx, vault.VaultID)
+                if err == sql.ErrNoRows {
+                    return echo.ErrNotFound
+                }
 		if err != nil {
 			return echo.ErrBadRequest
 		}
@@ -162,9 +202,10 @@ type VaultItemParams struct {
 	Icon string `json:"icon"`
 }
 
+// create an item in a vault
 func AddVaultItem(ctx context.Context, queries *schema.Queries) echo.HandlerFunc {
 	return func(c echo.Context) error {
-		vaultId, err := getVaultIdParam(c.Param("id"))
+		vaultId, err := utils.GetIDParam(c.Param("vaultId"))
 		if err != nil {
 			return err
 		}
@@ -177,85 +218,77 @@ func AddVaultItem(ctx context.Context, queries *schema.Queries) echo.HandlerFunc
 		}
 
 		params := new(VaultItemParams)
-		if err = c.Bind(params); err != nil {
-			return echo.ErrBadRequest
+		if err = utils.BindValidateParams(c, params); err != nil {
+			return err
 		}
 
-		if err = c.Validate(params); err != nil {
-			return echo.ErrBadRequest
-		}
-
-		if err = queries.AddVaultItem(ctx, schema.AddVaultItemParams{
+                item, err := queries.AddVaultItem(ctx, schema.AddVaultItemParams{
 			VaultID: vault.VaultID,
 			Name:    params.Name,
-			Icon:    sql.NullString{String: params.Icon, Valid: true},
-		}); err != nil {
-			return echo.ErrInternalServerError
+			Icon:    &params.Icon,
+		})
+                if err != nil {
+                        return utils.HandleQueryError(err, "Invalid vault")
 		}
 
-		return c.NoContent(http.StatusOK)
+		return c.JSON(http.StatusOK, echo.Map{
+                        "itemId": item.ItemID,
+                })
 	}
 }
 
+// update an item in a vault
 func UpdateVaultItem(ctx context.Context, queries *schema.Queries) echo.HandlerFunc {
 	return func(c echo.Context) error {
-                vaultId, err := getVaultIdParam(c.Param("id")) 
+                user := c.Get("user").(schema.User)
+                vaultItem, err := getVaultItem(ctx, queries, user.UserID, c.Param("itemId"))
                 if err != nil {
                     return err
                 }
 
-                user := c.Get("user").(schema.User)
-                vault, err := getUserVault(ctx, queries, vaultId, user.UserID)
-
+                // get the update info from the request
 		params := new(VaultItemParams)
-		if err = c.Bind(params); err != nil {
-			return echo.ErrBadRequest
+		if err = utils.BindValidateParams(c, params); err != nil {
+			return err
 		}
 
-		if err = c.Validate(params); err != nil {
-			return echo.ErrBadRequest
-		}
+                // default the update info back to the original data if not passed
+                if len(params.Name) == 0 {
+                    params.Name = vaultItem.Name
+                }
+                if len(params.Icon) == 0 && vaultItem.Icon != nil {
+                    params.Icon = *vaultItem.Icon
+                }
 
 		err = queries.UpdateVaultItem(ctx, schema.UpdateVaultItemParams{
-			VaultID: vault.VaultID,
+			VaultID: vaultItem.VaultID,
+                        ItemID: vaultItem.ItemID,
 			Name:    params.Name,
-			Icon:    sql.NullString{String: params.Icon, Valid: true},
+			Icon:    &params.Icon,
 		})
 		if err != nil {
-			return auth.HandleQueryError(err, "Vault item already exists")
+			return utils.HandleQueryError(err, "Vault item already exists")
 		}
 
 		return c.NoContent(http.StatusOK)
 	}
 }
 
+// delete an item from a vault
 func DeleteVautlItem(ctx context.Context, queries *schema.Queries) echo.HandlerFunc {
 	return func(c echo.Context) error {
-                vaultItemId, err := getVaultIdParam(c.Param("id")) 
+                user := c.Get("user").(schema.User)
+                vaultItem, err := getVaultItem(ctx, queries, user.UserID, c.Param("itemId"))
                 if err != nil {
                     return err
                 }
 
-                user := c.Get("user").(schema.User)
-
-                // get the vault item and vault data
-                vaultItem, err := queries.GetVaultItem(vaultItemId)
+                err = queries.DeleteVaultItem(ctx, vaultItem.ItemID)
                 if err != nil {
-                    return echo.ErrBadRequest
-                }
-
-                // the vault the item belongs to is not the user's
-                if vaultItem.UserID != user.UserID {
-                    return echo.ErrUnauthorized
-                }
-
-                err = queries.DeleteVaultItem(vaultItem.VaultID)
-                if err != nil {
-                    log.Println("Failed to delete vault item:", err)
-                    return echo.ErrInternalServerError
+                        return utils.HandleQueryError(err, "No vault with that ID")
                 }
 
                 return c.JSON(http.StatusOK, vaultItem)
-		// return c.NoContent(http.StatusOK)
 	}
 }
+

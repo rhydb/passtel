@@ -42,7 +42,7 @@ func main() {
 	e := echo.New()
 	e.Validator = &CustomValidator{validator: validator.New()}
 
-	db, err := sql.Open("postgres", "user=rb dbname=passtel sslmode=disable")
+	db, err := sql.Open("postgres", "user=passtel password=passtel dbname=passtel sslmode=disable")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -58,15 +58,23 @@ func main() {
 	e.GET("/vaults", routes.ListVaults(ctx, queries), auth.TokenAuth(ctx, queries))
 
 	vault := e.Group("/vault", auth.TokenAuth(ctx, queries))
-	vault.POST("/:name", routes.CreateVault(ctx, queries))
-	vault.GET("/:id", routes.GetVault(ctx, queries))
-	vault.PUT("/:id", routes.UpdateVault(ctx, queries))
-	vault.DELETE("/:id", routes.DeleteVault(ctx, queries))
+	vault.POST("/:vaultName", routes.CreateVault(ctx, queries))
+	vault.GET("/:vaultId", routes.ListVaultItems(ctx, queries))
+	vault.PUT("/:vaultId", routes.UpdateVault(ctx, queries))
+	vault.DELETE("/:vaultId", routes.DeleteVault(ctx, queries))
 
 	// vault items
-	vault.POST("/:id", routes.AddVaultItem(ctx, queries))
-        vault.PUT(":/id", routes.UpdateVaultItem(ctx, queries))
-        vault.DELETE("/:id")
+        item := e.Group("/item", auth.TokenAuth(ctx, queries))
+        item.POST("/:vaultId", routes.AddVaultItem(ctx, queries))
+        item.PUT("/:itemId", routes.UpdateVaultItem(ctx, queries))
+        item.DELETE("/:itemId", routes.DeleteVautlItem(ctx, queries))
+        item.GET("/:itemId", routes.ListItemFields(ctx, queries))
+
+        // fields
+        field := e.Group("/field", auth.TokenAuth(ctx, queries))
+        field.POST("/:itemId", routes.AddField(ctx, queries));
+        field.PUT("/:fieldId", routes.UpdateField(ctx, queries))
+        field.DELETE("/:fieldId", routes.DeleteField(ctx, queries))
 
 	e.Logger.Fatal(e.Start(":1234"))
 }

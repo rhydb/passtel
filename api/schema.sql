@@ -1,6 +1,11 @@
 CREATE TYPE fieldtype AS ENUM
     ('username', 'url', 'email', 'password', 'otp');
 
+CREATE SEQUENCE IF NOT EXISTS vault_items_item_id_seq;
+CREATE SEQUENCE IF NOT EXISTS vault_items_vault_id_seq;
+CREATE SEQUENCE IF NOT EXISTS fields_field_id_seq;
+CREATE SEQUENCE IF NOT EXISTS fields_item_id_seq;
+
 CREATE TABLE IF NOT EXISTS users (
        user_id BIGSERIAL PRIMARY KEY,
        username varchar(25) UNIQUE NOT NULL,
@@ -47,15 +52,13 @@ CREATE TABLE IF NOT EXISTS public.vault_items
 
 CREATE TABLE IF NOT EXISTS fields
 (
-    field_id bigint NOT NULL DEFAULT nextval('fields_field_url_seq'::regclass),
+    field_id bigint NOT NULL DEFAULT nextval('fields_field_id_seq'::regclass),
     item_id bigint NOT NULL DEFAULT nextval('fields_item_id_seq'::regclass),
     type fieldtype NOT NULL DEFAULT 'username'::fieldtype,
-    " value" character varying COLLATE pg_catalog."default",
+    value character varying(127) COLLATE pg_catalog."default" NOT NULL,
     CONSTRAINT fields_pkey PRIMARY KEY (field_id),
     CONSTRAINT fields_item_id_fkey FOREIGN KEY (item_id)
-        REFERENCES public.vault_items (item_id) MATCH SIMPLE
+        REFERENCES vault_items (item_id) MATCH SIMPLE
         ON UPDATE NO ACTION
-        ON DELETE NO ACTION
-        NOT VALID
+        ON DELETE CASCADE
 );
-

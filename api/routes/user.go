@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"rhydb/passtel/api/schema"
+	"rhydb/passtel/api/utils"
 
 	"github.com/labstack/echo/v4"
 	"github.com/lib/pq"
@@ -25,12 +26,8 @@ func GetAuthedUser(c echo.Context) (err error) {
 func GetToken(ctx context.Context, queries *schema.Queries) echo.HandlerFunc {
 	return func(c echo.Context) (err error) {
 		creds := new(Credentials)
-		if err = c.Bind(creds); err != nil {
-			return echo.ErrBadRequest
-		}
-
-		if err = c.Validate(creds); err != nil {
-			return echo.ErrBadRequest
+		if err = utils.BindValidateParams(c, creds); err != nil {
+			return err
 		}
 
 		creds.Password, err = hash(creds.Password)
@@ -61,12 +58,8 @@ func GetToken(ctx context.Context, queries *schema.Queries) echo.HandlerFunc {
 func CreateUser(ctx context.Context, queries *schema.Queries) echo.HandlerFunc {
 	return func(c echo.Context) (err error) {
 		creds := new(Credentials)
-		if err = c.Bind(creds); err != nil {
-			return echo.ErrBadRequest
-		}
-
-		if err = c.Validate(creds); err != nil {
-			return echo.ErrBadRequest
+		if err = utils.BindValidateParams(c, creds); err != nil {
+			return err
 		}
 
 		creds.Password, err = hash(creds.Password)
@@ -89,7 +82,14 @@ func CreateUser(ctx context.Context, queries *schema.Queries) echo.HandlerFunc {
 			return echo.ErrInternalServerError
 		}
 
-		return c.JSON(http.StatusOK, response)
+		token, err := queries.GenToken(ctx, response.UserID)
+		if err != nil {
+			log.Println("failed to generate token:", err)
+			return echo.ErrInternalServerError
+		}
+		return c.JSON(http.StatusOK, echo.Map{
+			"token": token,
+		})
 	}
 }
 
